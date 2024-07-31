@@ -1,0 +1,135 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: gleb120689
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: gleb-devices-go
+service: devicesgo
+
+provider:
+  name: aws
+  region: us-east-1
+  runtime: provided.al2023
+  stackTags:
+    Tag: "Owner"
+  environment:
+    DYNAMODB_TABLE: 'gleb-devices-test'
+    SECONDARY_INDEX: 'MacAddressAndDateIndex'
+    QUEUE_NAME : 'gleb-devices-queue-test.fifo'
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: [
+            "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}",
+            "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}/index/*"
+          ]
+        - Effect: Allow
+          Action:
+            - sqs:*
+          Resource: "arn:aws:sqs:${self:provider.region}:*:${self:provider.environment.QUEUE_NAME}"
+
+
+
+plugins:
+  - serverless-plugin-resource-tagging
+
+package:
+  individually: true
+
+functions:
+  addDevice:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/addDevice.zip
+    events:
+      - http:
+          path: device
+          method: post
+          authorizer: aws_iam
+  getDevice:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/getDevice.zip
+    events:
+      - http:
+          path: device/{id}
+          method: get
+          authorizer: aws_iam
+  deleteDevice:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/deleteDevice.zip
+    events:
+      - http:
+          path: device/{id}
+          method: delete
+          authorizer: aws_iam
+  getDeviceByMac:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/getDeviceByMac.zip
+    events:
+      - http:
+          path: deviceByMac/{macAddress}
+          method: get
+          authorizer: aws_iam
+  updateDevice:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/updateDevice.zip
+    events:
+      - http:
+          path: device/{id}
+          method: put
+          authorizer: aws_iam
+
+  handleQueueEvent:
+    handler: bootstrap
+    package:
+      artifact: build/lambda/handleQueueEvent.zip
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - GlebsQueue
+              - Arn
+
+
+resources:
+  Resources:
+    GlebsDynamoDbTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE}
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: macAddress
+            AttributeType: S
+          - AttributeName: createTime
+            AttributeType: N
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.SECONDARY_INDEX}
+            KeySchema:
+              - AttributeName: macAddress
+                KeyType: HASH
+              - AttributeName: createTime
+                KeyType: RANGE
+            Projection:
+              ProjectionType: 'ALL'
+        BillingMode: PAY_PER_REQUEST
+    GlebsQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: ${self:provider.environment.QUEUE_NAME}
+        FifoQueue: true
+        MessageRetentionPeriod: 300
