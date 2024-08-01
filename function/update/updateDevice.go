@@ -26,7 +26,9 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 		common.ErrorLog.Println("JSON parse error ", err)
 		return events.APIGatewayProxyResponse{StatusCode: 400}, nil
 	}
+	//prevent from updates
 	device.Id = ""
+	device.CreateTime = 0
 
 	av, err := dynamodbattribute.MarshalMap(device)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -90,8 +91,8 @@ func TestAddGetCycle(t *testing.T) {
 		assert.Equal(t, "0000000000FF", received.MacAddress)
 	}
 
-	id := createDeviceAndAssert(t, d, assertion)
-	getDeviceAndAssert(t, id, assertion)
+	dev := createDeviceAndAssert(t, d, assertion)
+	getDeviceAndAssert(t, dev.Id, assertion)
 }
 
 func TestAddGetByMacCycle(t *testing.T) {
@@ -103,8 +104,9 @@ func TestAddGetByMacCycle(t *testing.T) {
 		assert.Equal(t, mac, received.MacAddress)
 	}
 
-	createDeviceAndAssert(t, d1, assertion)
-	createDeviceAndAssert(t, d2, assertion)
+	d1 = createDeviceAndAssert(t, d1, assertion)
+	time.Sleep(100 * time.Millisecond)
+	d2 = createDeviceAndAssert(t, d2, assertion)
 
 	getDevicesByMacAddressAndAssert(t, mac, func(t *testing.T, received []common.Device) {
 		assert.Len(t, received, 2)
@@ -112,20 +114,28 @@ func TestAddGetByMacCycle(t *testing.T) {
 		assert.Equal(t, mac, received[1].MacAddress)
 		assert.ElementsMatch(t, []string{"LG2024", "wWatch"}, []string{received[0].DeviceName, received[1].DeviceName})
 		assert.ElementsMatch(t, []string{"tv", "watch"}, []string{received[0].DeviceType, received[1].DeviceType})
-	})
+	}, "", "")
+
+	getDevicesByMacAddressAndAssert(t, mac, func(t *testing.T, received []common.Device) {
+		assert.Len(t, received, 1)
+	}, strconv.FormatInt(d1.CreateTime+10, 10), "")
+
+	getDevicesByMacAddressAndAssert(t, mac, func(t *testing.T, received []common.Device) {
+		assert.Len(t, received, 1)
+	}, "", strconv.FormatInt(d2.CreateTime-10, 10))
 }
 
 func TestAddAndUpdateCycle(t *testing.T) {
 	var mac = "00000000001C"
 	d := common.Device{DeviceName: "SGV524", DeviceType: "Lamp", MacAddress: mac}
-	id := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
+	dev := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
 		assert.Equal(t, mac, received.MacAddress)
 		assert.Equal(t, "Lamp", received.DeviceType)
 		assert.Equal(t, "SGV524", received.DeviceName)
 	})
 	newDevice := common.Device{DeviceName: "SGV_NEW", DeviceType: "LampSmart"}
 
-	updateDeviceAndAssert(t, newDevice, id, func(t *testing.T, received *common.Device) {
+	updateDeviceAndAssert(t, newDevice, dev.Id, func(t *testing.T, received *common.Device) {
 		assert.Equal(t, mac, received.MacAddress)
 		assert.Equal(t, "LampSmart", received.DeviceType)
 		assert.Equal(t, "SGV_NEW", received.DeviceName)
@@ -134,12 +144,12 @@ func TestAddAndUpdateCycle(t *testing.T) {
 
 func TestAddAndDeleteCycle(t *testing.T) {
 	d := common.Device{DeviceName: "SmartChargerS4", DeviceType: "Charger", MacAddress: "00000000002C"}
-	id := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
+	dev := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
 		assert.Equal(t, "00000000002C", received.MacAddress)
 		assert.Equal(t, "Charger", received.DeviceType)
 		assert.Equal(t, "SmartChargerS4", received.DeviceName)
 	})
-	deleteDeviceAndAssert(t, id)
+	deleteDeviceAndAssert(t, dev.Id)
 }
 
 func TestWhenUpdateWithWrongIdErrorReturned(t *testing.T) {
@@ -157,14 +167,14 @@ func TestWhenUpdateWithWrongIdErrorReturned(t *testing.T) {
 
 func TestWhenSqsEventComesHouseIdGetsUpdated(t *testing.T) {
 	d := common.Device{DeviceName: "Ebook23", DeviceType: "Book", MacAddress: "0000000000CC"}
-	id := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
+	dev := createDeviceAndAssert(t, d, func(t *testing.T, received common.Device) {
 		assert.Equal(t, "0000000000CC", received.MacAddress)
 		assert.Equal(t, "Book", received.DeviceType)
 		assert.Equal(t, "Ebook23", received.DeviceName)
 		assert.Equal(t, "", received.HouseId)
 	})
 
-	var rec = common.SqsRecord{Id: id, HouseId: "11111111-1111-1111-1111-111111111111"}
+	var rec = common.SqsRecord{Id: dev.Id, HouseId: "11111111-1111-1111-1111-111111111111"}
 	bts, err := json.Marshal(rec)
 	failOnError(err, t)
 
@@ -184,14 +194,14 @@ func TestWhenSqsEventComesHouseIdGetsUpdated(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		var res = false
-		getDeviceAndAssert(t, id, func(t *testing.T, received common.Device) {
+		getDeviceAndAssert(t, dev.Id, func(t *testing.T, received common.Device) {
 			res = "11111111-1111-1111-1111-111111111111" == received.HouseId
 		})
 		return res
 	}, 3*time.Second, 400*time.Millisecond)
 }
 
-func createDeviceAndAssert(t *testing.T, d common.Device, assertion func(t *testing.T, received common.Device)) string {
+func createDeviceAndAssert(t *testing.T, d common.Device, assertion func(t *testing.T, received common.Device)) common.Device {
 	bts, err := json.Marshal(d)
 	failOnError(err, t)
 
@@ -207,7 +217,7 @@ func createDeviceAndAssert(t *testing.T, d common.Device, assertion func(t *test
 	assertion(t, received)
 
 	addedIds = append(addedIds, received.Id)
-	return received.Id
+	return received
 }
 
 func getDeviceAndAssert(t *testing.T, id string, assertion func(t *testing.T, received common.Device)) {
@@ -221,8 +231,8 @@ func getDeviceAndAssert(t *testing.T, id string, assertion func(t *testing.T, re
 	assertion(t, received)
 }
 
-func getDevicesByMacAddressAndAssert(t *testing.T, mac string, assertion func(t *testing.T, received []common.Device)) {
-	rq, err := http.NewRequest("GET", baseURL+"/dev/deviceByMac/"+mac, nil)
+func getDevicesByMacAddressAndAssert(t *testing.T, mac string, assertion func(t *testing.T, received []common.Device), start, end string) {
+	rq, err := http.NewRequest("GET", baseURL+"/dev/deviceByMac/"+mac+"?start="+start+"&end="+end, nil)
 	failOnError(err, t)
 	_, err = signer.Sign(rq, nil, "execute-api", region, time.Now())
 	failOnError(err, t)

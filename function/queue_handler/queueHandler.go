@@ -16,6 +16,7 @@ func handler(sqsEvent events.SQSEvent) error {
 		err := json.Unmarshal([]byte(message.Body), &record)
 		if err != nil {
 			common.ErrorLog.Println("Incorrect JSON format ", message.Body, err)
+			continue
 		}
 
 		input := &dynamodb.UpdateItemInput{
